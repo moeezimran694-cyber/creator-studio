@@ -1,0 +1,6 @@
+{
+  "name": "Creator Studio",
+  "description": "Dark cyberpunk digital software marketplace with persistent database storage, Super Admin RBAC, customizable storefront, and verified payment order approvals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,581 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core helper primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isSuperAdmin() {
+      return isVerified() && request.auth.token.email == 'moeezi396@gmail.com';
+    }
+
+    function isOwner(uid) {
+      return isVerified() && request.auth.uid == uid;
+    }
+
+    function profileExists(uid) {
+      return exists(/databases/$(database)/documents/profiles/$(uid));
+    }
+
+    function getProfile(uid) {
+      return get(/databases/$(database)/documents/profiles/$(uid)).data;
+    }
+
+    function isActiveAdmin() {
+      return isVerified() && (
+        isSuperAdmin() ||
+        (profileExists(request.auth.uid) &&
+          getProfile(request.auth.uid).role == 'ADMIN' &&
+          getProfile(request.auth.uid).status == 'ACTIVE')
+      );
+    }
+
+    function hasPermission(permKey) {
+      return isSuperAdmin() || (
+        isActiveAdmin() &&
+        exists(/databases/$(database)/documents/admin_permissions/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_permissions/$(request.auth.uid)).data.permissions[permKey] == true
+      );
+    }
+
+    function hasValidPendingInvitation(invId) {
+      return isValidId(invId) &&
+        exists(/databases/$(database)/documents/admin_invitations/$(invId)) &&
+        get(/databases/$(database)/documents/admin_invitations/$(invId)).data.email == request.auth.token.email &&
+        get(/databases/$(database)/documents/admin_invitations/$(invId)).data.status == 'PENDING' &&
+        get(/databases/$(database)/documents/admin_invitations/$(invId)).data.expiresAt > request.time &&
+        getAfter(/databases/$(database)/documents/admin_invitations/$(invId)).data.status == 'ACCEPTED';
+    }
+
+    // Entity validators
+    function isValidProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'status', 'createdAt', 'lastLogin']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'status', 'acceptedInvitationId', 'createdAt', 'lastLogin']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 11 && data.email.size() <= 254 &&
+        data.email.matches('^[^@]+@gmail\\.com$') &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.role in ['USER', 'ADMIN', 'SUPER_ADMIN'] &&
+        data.status in ['ACTIVE', 'SUSPENDED'] &&
+        (!('acceptedInvitationId' in data) || (data.acceptedInvitationId is string && data.acceptedInvitationId.size() <= 128)) &&
+        data.createdAt is timestamp &&
+        data.lastLogin is timestamp;
+    }
+
+    function isValidAdminPermissions(data) {
+      return data.keys().hasAll(['adminUserId', 'adminEmail', 'permissions', 'grantedBy', 'updatedAt']) &&
+        data.keys().hasOnly(['adminUserId', 'adminEmail', 'permissions', 'grantedBy', 'updatedAt']) &&
+        isValidId(data.adminUserId) &&
+        data.adminEmail is string && data.adminEmail.size() >= 3 && data.adminEmail.size() <= 254 &&
+        data.permissions is map &&
+        data.permissions.keys().hasOnly([
+          'orders_view', 'orders_approve', 'orders_reject',
+          'apps_view', 'apps_add', 'apps_edit', 'apps_delete', 'apps_change_price', 'apps_change_files',
+          'content_edit', 'appearance_edit',
+          'payments_view', 'payments_edit_easypaisa', 'payments_edit_jazzcash'
+        ]) &&
+        data.grantedBy is string && data.grantedBy.size() >= 1 && data.grantedBy.size() <= 128 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminInvitation(data) {
+      return data.keys().hasAll(['email', 'invitationTokenHash', 'permissions', 'invitedBy', 'expiresAt', 'createdAt', 'status']) &&
+        data.keys().hasOnly(['email', 'invitationTokenHash', 'permissions', 'invitedBy', 'expiresAt', 'createdAt', 'status', 'acceptedUid', 'acceptedAt']) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.invitationTokenHash is string && data.invitationTokenHash.size() >= 8 && data.invitationTokenHash.size() <= 128 &&
+        data.permissions is map &&
+        data.permissions.keys().hasOnly([
+          'orders_view', 'orders_approve', 'orders_reject',
+          'apps_view', 'apps_add', 'apps_edit', 'apps_delete', 'apps_change_price', 'apps_change_files',
+          'content_edit', 'appearance_edit',
+          'payments_view', 'payments_edit_easypaisa', 'payments_edit_jazzcash'
+        ]) &&
+        data.invitedBy is string && data.invitedBy.size() >= 1 && data.invitedBy.size() <= 128 &&
+        data.expiresAt is timestamp &&
+        data.createdAt is timestamp &&
+        data.status in ['PENDING', 'ACCEPTED', 'REVOKED'] &&
+        (!('acceptedUid' in data) || (data.acceptedUid is string && data.acceptedUid.size() <= 128)) &&
+        (!('acceptedAt' in data) || data.acceptedAt is timestamp);
+    }
+
+    function isValidAppListing(data) {
+      return data.keys().hasAll(['name', 'category', 'version', 'fileSize', 'description', 'features', 'pricePkr', 'isFeatured', 'isPublished', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['name', 'iconUrl', 'iconKey', 'category', 'version', 'fileSize', 'description', 'features', 'pricePkr', 'isFeatured', 'isPublished', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        (!('iconUrl' in data) || (data.iconUrl is string && data.iconUrl.size() <= 500000)) &&
+        (!('iconKey' in data) || (data.iconKey is string && data.iconKey.size() <= 64)) &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 64 &&
+        data.version is string && data.version.size() >= 1 && data.version.size() <= 40 &&
+        data.fileSize is string && data.fileSize.size() >= 1 && data.fileSize.size() <= 40 &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 1500 &&
+        data.features is list && data.features.size() <= 12 &&
+        (data.features.size() == 0 || (data.features[0] is string && data.features[0].size() <= 160)) &&
+        data.pricePkr is number && data.pricePkr >= 0 && data.pricePkr <= 1000000 &&
+        data.isFeatured is bool &&
+        data.isPublished is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAppFile(data) {
+      return data.keys().hasAll(['appId', 'downloadStoragePath', 'fileName', 'updatedBy', 'updatedAt']) &&
+        data.keys().hasOnly(['appId', 'downloadStoragePath', 'fileName', 'releaseNotes', 'updatedBy', 'updatedAt']) &&
+        isValidId(data.appId) &&
+        data.downloadStoragePath is string && data.downloadStoragePath.size() >= 1 && data.downloadStoragePath.size() <= 600000 &&
+        data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 160 &&
+        (!('releaseNotes' in data) || (data.releaseNotes is string && data.releaseNotes.size() <= 1000)) &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['userId', 'userEmail', 'userName', 'appId', 'appName', 'transactionId', 'paymentMethod', 'hasScreenshot', 'amountPkr', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['userId', 'userEmail', 'userName', 'appId', 'appName', 'transactionId', 'paymentMethod', 'hasScreenshot', 'amountPkr', 'status', 'rejectionReason', 'reviewedBy', 'reviewedByEmail', 'reviewedAt', 'createdAt']) &&
+        isValidId(data.userId) &&
+        data.userEmail is string && data.userEmail.size() >= 3 && data.userEmail.size() <= 254 &&
+        data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 120 &&
+        isValidId(data.appId) &&
+        data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 120 &&
+        data.transactionId is string && data.transactionId.matches('^[0-9]{11}$') &&
+        data.paymentMethod in ['EasyPaisa', 'JazzCash'] &&
+        data.hasScreenshot is bool &&
+        data.amountPkr is number && data.amountPkr >= 0 && data.amountPkr <= 1000000 &&
+        data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+        (!('rejectionReason' in data) || (data.rejectionReason is string && data.rejectionReason.size() <= 500)) &&
+        (!('reviewedBy' in data) || data.reviewedBy == null || (data.reviewedBy is string && data.reviewedBy.size() <= 128)) &&
+        (!('reviewedByEmail' in data) || data.reviewedByEmail == null || (data.reviewedByEmail is string && data.reviewedByEmail.size() <= 254)) &&
+        (!('reviewedAt' in data) || data.reviewedAt == null || data.reviewedAt is timestamp) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidOrderScreenshot(data) {
+      return data.keys().hasAll(['orderId', 'userId', 'imageData', 'createdAt']) &&
+        data.keys().hasOnly(['orderId', 'userId', 'imageData', 'createdAt']) &&
+        isValidId(data.orderId) &&
+        isValidId(data.userId) &&
+        data.imageData is string && data.imageData.size() >= 5 && data.imageData.size() <= 600000 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidEntitlement(data) {
+      return data.keys().hasAll(['userId', 'appId', 'orderId', 'grantedBy', 'grantedAt']) &&
+        data.keys().hasOnly(['userId', 'appId', 'orderId', 'grantedBy', 'grantedAt']) &&
+        isValidId(data.userId) &&
+        isValidId(data.appId) &&
+        isValidId(data.orderId) &&
+        data.grantedBy is string && data.grantedBy.size() >= 1 && data.grantedBy.size() <= 128 &&
+        data.grantedAt is timestamp;
+    }
+
+    function isValidPaymentSetting(data) {
+      return data.keys().hasAll(['method', 'accountTitle', 'accountNumber', 'instructions', 'isEnabled', 'updatedBy', 'updatedAt']) &&
+        data.keys().hasOnly(['method', 'accountTitle', 'accountNumber', 'instructions', 'qrImagePath', 'isEnabled', 'updatedBy', 'updatedAt']) &&
+        data.method in ['EasyPaisa', 'JazzCash'] &&
+        data.accountTitle is string && data.accountTitle.size() >= 1 && data.accountTitle.size() <= 120 &&
+        data.accountNumber is string && data.accountNumber.size() >= 4 && data.accountNumber.size() <= 64 &&
+        data.instructions is string && data.instructions.size() >= 1 && data.instructions.size() <= 1000 &&
+        (!('qrImagePath' in data) || (data.qrImagePath is string && data.qrImagePath.size() <= 500000)) &&
+        data.isEnabled is bool &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWebsiteSetting(data) {
+      return data.keys().hasAll(['settingKey', 'settingValue', 'updatedBy', 'updatedAt']) &&
+        data.keys().hasOnly(['settingKey', 'settingValue', 'updatedBy', 'updatedAt']) &&
+        data.settingKey is string && data.settingKey.size() >= 1 && data.settingKey.size() <= 64 &&
+        data.settingValue is map &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['actorUserId', 'actorEmail', 'action', 'entityType', 'entityId', 'summary', 'createdAt']) &&
+        data.keys().hasOnly(['actorUserId', 'actorEmail', 'action', 'entityType', 'entityId', 'summary', 'oldValue', 'newValue', 'createdAt']) &&
+        data.actorUserId is string && data.actorUserId.size() >= 1 && data.actorUserId.size() <= 128 &&
+        data.actorEmail is string && data.actorEmail.size() >= 3 && data.actorEmail.size() <= 254 &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 80 &&
+        data.entityType is string && data.entityType.size() >= 1 && data.entityType.size() <= 64 &&
+        data.entityId is string && data.entityId.size() >= 1 && data.entityId.size() <= 128 &&
+        data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 500 &&
+        (!('oldValue' in data) || (data.oldValue is string && data.oldValue.size() <= 4000)) &&
+        (!('newValue' in data) || (data.newValue is string && data.newValue.size() <= 4000)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidDownloadLog(data) {
+      return data.keys().hasAll(['userId', 'appId', 'appName', 'createdAt']) &&
+        data.keys().hasOnly(['userId', 'appId', 'appName', 'createdAt']) &&
+        isValidId(data.userId) &&
+        isValidId(data.appId) &&
+        data.appName is string && data.appName.size() >= 1 && data.appName.size() <= 120 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidDownloadToken(data) {
+      return data.keys().hasAll(['tokenId', 'userId', 'appId', 'orderId', 'used', 'expiresAt', 'createdAt']) &&
+        data.keys().hasOnly(['tokenId', 'userId', 'appId', 'orderId', 'used', 'expiresAt', 'usedAt', 'createdAt']) &&
+        isValidId(data.tokenId) &&
+        isValidId(data.userId) &&
+        isValidId(data.appId) &&
+        isValidId(data.orderId) &&
+        data.used is bool &&
+        data.expiresAt is timestamp &&
+        (!('usedAt' in data) || data.usedAt is timestamp) &&
+        data.createdAt is timestamp;
+    }
+
+    // Connection test document
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Profiles collection
+    match /profiles/{uid} {
+      allow get: if isValidId(uid) && (isOwner(uid) || isSuperAdmin() || isActiveAdmin());
+      allow list: if isSuperAdmin() || isActiveAdmin() || (isVerified() && resource.data.uid == request.auth.uid);
+
+      allow create: if isValidId(uid) && isVerified() && isValidProfile(incoming()) && (
+        (isOwner(uid) &&
+          incoming().uid == request.auth.uid &&
+          incoming().email == request.auth.token.email &&
+          incoming().createdAt == request.time &&
+          incoming().lastLogin == request.time &&
+          (
+            (request.auth.token.email == 'moeezi396@gmail.com' && incoming().role == 'SUPER_ADMIN' && incoming().status == 'ACTIVE') ||
+            (request.auth.token.email != 'moeezi396@gmail.com' && incoming().role == 'USER' && incoming().status == 'ACTIVE') ||
+            (request.auth.token.email != 'moeezi396@gmail.com' && incoming().role == 'ADMIN' && incoming().status == 'ACTIVE' &&
+              'acceptedInvitationId' in incoming() && hasValidPendingInvitation(incoming().acceptedInvitationId))
+          )
+        ) ||
+        (isSuperAdmin() &&
+          incoming().uid == uid &&
+          incoming().email != 'moeezi396@gmail.com' &&
+          incoming().role in ['USER', 'ADMIN'] &&
+          incoming().createdAt == request.time &&
+          incoming().lastLogin == request.time
+        )
+      );
+
+      allow update: if isValidId(uid) && isVerified() && isValidProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt && (
+        // Self update (login timestamp / display name, Super Admin self-repair, or invited user claiming ADMIN)
+        (isOwner(uid) &&
+          incoming().lastLogin == request.time && (
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'lastLogin']) ||
+            (isSuperAdmin() && incoming().role == 'SUPER_ADMIN' && incoming().status == 'ACTIVE' &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'lastLogin', 'role', 'status'])) ||
+            (existing().role == 'USER' && existing().status == 'ACTIVE' &&
+              incoming().role == 'ADMIN' && incoming().status == 'ACTIVE' &&
+              'acceptedInvitationId' in incoming() &&
+              hasValidPendingInvitation(incoming().acceptedInvitationId) &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['role', 'lastLogin', 'acceptedInvitationId']))
+          )
+        ) ||
+        // Super Admin managing non-owner profiles
+        (isSuperAdmin() &&
+          existing().email != 'moeezi396@gmail.com' &&
+          incoming().role in ['USER', 'ADMIN'] &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'displayName'])
+        )
+      );
+
+      // Permanent Super Admin cannot be deleted
+      allow delete: if isValidId(uid) && isSuperAdmin() && existing().email != 'moeezi396@gmail.com';
+    }
+
+    // Admin Permissions (Super Admin only for writes, or invited user claiming exact invitation permissions)
+    match /admin_permissions/{adminUid} {
+      allow get: if isValidId(adminUid) && (isOwner(adminUid) || isSuperAdmin());
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(adminUid) && isValidAdminPermissions(incoming()) &&
+        incoming().adminUserId == adminUid &&
+        incoming().updatedAt == request.time && (
+        (isSuperAdmin() && incoming().grantedBy == request.auth.uid) ||
+        (isOwner(adminUid) &&
+          incoming().adminEmail == request.auth.token.email &&
+          getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data.role == 'ADMIN' &&
+          'acceptedInvitationId' in getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data &&
+          hasValidPendingInvitation(getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data.acceptedInvitationId) &&
+          incoming().grantedBy == get(/databases/$(database)/documents/admin_invitations/$(getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data.acceptedInvitationId)).data.invitedBy &&
+          incoming().permissions == get(/databases/$(database)/documents/admin_invitations/$(getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data.acceptedInvitationId)).data.permissions
+        )
+      );
+      allow update: if isValidId(adminUid) && isValidAdminPermissions(incoming()) &&
+        incoming().adminUserId == adminUid &&
+        incoming().updatedAt == request.time && (
+        (isSuperAdmin() && incoming().grantedBy == request.auth.uid) ||
+        (isOwner(adminUid) &&
+          incoming().adminEmail == request.auth.token.email &&
+          getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data.role == 'ADMIN' &&
+          'acceptedInvitationId' in getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data &&
+          hasValidPendingInvitation(getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data.acceptedInvitationId) &&
+          incoming().grantedBy == get(/databases/$(database)/documents/admin_invitations/$(getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data.acceptedInvitationId)).data.invitedBy &&
+          incoming().permissions == get(/databases/$(database)/documents/admin_invitations/$(getAfter(/databases/$(database)/documents/profiles/$(adminUid)).data.acceptedInvitationId)).data.permissions
+        )
+      );
+      allow delete: if isValidId(adminUid) && isSuperAdmin();
+    }
+
+    // Admin Invitations
+    match /admin_invitations/{invitationId} {
+      allow get: if isValidId(invitationId) && (
+        isSuperAdmin() ||
+        (isVerified() && existing().email == request.auth.token.email)
+      );
+      allow list: if isSuperAdmin() || (isVerified() && resource.data.email == request.auth.token.email);
+      allow create: if isValidId(invitationId) && isSuperAdmin() && isValidAdminInvitation(incoming()) &&
+        incoming().invitedBy == request.auth.uid &&
+        incoming().status == 'PENDING' &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(invitationId) && isVerified() && isValidAdminInvitation(incoming()) &&
+        incoming().email == existing().email &&
+        incoming().invitedBy == existing().invitedBy &&
+        incoming().createdAt == existing().createdAt && (
+        (isSuperAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'expiresAt', 'permissions'])) ||
+        (existing().email == request.auth.token.email &&
+          existing().status == 'PENDING' &&
+          existing().expiresAt > request.time &&
+          incoming().status == 'ACCEPTED' &&
+          incoming().acceptedUid == request.auth.uid &&
+          incoming().acceptedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'acceptedUid', 'acceptedAt']))
+      );
+      allow delete: if isValidId(invitationId) && isSuperAdmin();
+    }
+
+    // App Listings (Publicly readable when published)
+    match /apps/{appId} {
+      allow get: if isValidId(appId) && (existing().isPublished == true || isSuperAdmin() || hasPermission('apps_view'));
+      allow list: if resource.data.isPublished == true || isSuperAdmin() || hasPermission('apps_view');
+
+      allow create: if isValidId(appId) && (isSuperAdmin() || hasPermission('apps_add')) &&
+        isValidAppListing(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(appId) && isValidAppListing(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+        isSuperAdmin() ||
+        (hasPermission('apps_edit') && (
+          incoming().pricePkr == existing().pricePkr || hasPermission('apps_change_price')
+        )) ||
+        (hasPermission('apps_change_price') && incoming().diff(existing()).affectedKeys().hasOnly(['pricePkr', 'updatedAt']))
+      );
+
+      allow delete: if isValidId(appId) && (isSuperAdmin() || hasPermission('apps_delete'));
+    }
+
+    // Protected App Files (Never public)
+    match /app_files/{appId} {
+      allow get: if isValidId(appId) && (
+        isSuperAdmin() ||
+        isActiveAdmin() ||
+        hasPermission('apps_view') ||
+        hasPermission('apps_change_files') ||
+        (isVerified() && exists(/databases/$(database)/documents/entitlements/$(request.auth.uid + '_' + appId)))
+      );
+      allow list: if isSuperAdmin() || hasPermission('apps_view');
+
+      allow create: if isValidId(appId) && (isSuperAdmin() || hasPermission('apps_add') || hasPermission('apps_change_files')) &&
+        isValidAppFile(incoming()) &&
+        incoming().appId == appId &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(appId) && (isSuperAdmin() || hasPermission('apps_change_files')) &&
+        isValidAppFile(incoming()) &&
+        incoming().appId == appId &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time;
+
+      allow delete: if isValidId(appId) && (isSuperAdmin() || hasPermission('apps_delete'));
+    }
+
+    // Customer Orders
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && isSignedIn() && (
+        existing().userId == request.auth.uid || isSuperAdmin() || hasPermission('orders_view')
+      );
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isSuperAdmin() || hasPermission('orders_view')
+      );
+
+      allow create: if isValidId(orderId) && isVerified() && isValidOrder(incoming()) &&
+        incoming().userId == request.auth.uid &&
+        incoming().userEmail == request.auth.token.email &&
+        incoming().status == 'PENDING' &&
+        (!('reviewedBy' in incoming()) || incoming().reviewedBy == null) &&
+        (!('reviewedAt' in incoming()) || incoming().reviewedAt == null) &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/apps/$(incoming().appId)) &&
+        get(/databases/$(database)/documents/apps/$(incoming().appId)).data.isPublished == true &&
+        incoming().amountPkr == get(/databases/$(database)/documents/apps/$(incoming().appId)).data.pricePkr;
+
+      allow update: if isValidId(orderId) && isVerified() && isValidOrder(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().userEmail == existing().userEmail &&
+        incoming().appId == existing().appId &&
+        incoming().amountPkr == existing().amountPkr &&
+        incoming().transactionId == existing().transactionId &&
+        incoming().paymentMethod == existing().paymentMethod &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().reviewedBy == request.auth.uid &&
+        incoming().reviewedByEmail == request.auth.token.email &&
+        incoming().reviewedAt == request.time &&
+        (isSuperAdmin() || existing().userId != request.auth.uid) && (
+        (
+          (isSuperAdmin() || hasPermission('orders_approve')) &&
+          incoming().status == 'APPROVED' &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy', 'reviewedByEmail', 'reviewedAt', 'rejectionReason']) &&
+          existsAfter(/databases/$(database)/documents/entitlements/$(existing().userId + '_' + existing().appId))
+        ) ||
+        (
+          (isSuperAdmin() || hasPermission('orders_reject')) &&
+          incoming().status == 'REJECTED' &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy', 'reviewedByEmail', 'reviewedAt', 'rejectionReason'])
+        )
+      );
+
+      allow delete: if isValidId(orderId) && isSuperAdmin();
+    }
+
+    // Order Screenshots
+    match /order_screenshots/{orderId} {
+      allow get: if isValidId(orderId) && isSignedIn() && (
+        existing().userId == request.auth.uid || isSuperAdmin() || hasPermission('orders_view')
+      );
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isSuperAdmin() || hasPermission('orders_view')
+      );
+      allow create: if isValidId(orderId) && isVerified() && isValidOrderScreenshot(incoming()) &&
+        incoming().orderId == orderId &&
+        incoming().userId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update, delete: if isValidId(orderId) && isSuperAdmin();
+    }
+
+    // Download Entitlements
+    match /entitlements/{entitlementId} {
+      allow get: if isValidId(entitlementId) && isSignedIn() && (
+        existing().userId == request.auth.uid || isSuperAdmin() || hasPermission('orders_view')
+      );
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isSuperAdmin() || hasPermission('orders_view')
+      );
+      allow create: if isValidId(entitlementId) && (isSuperAdmin() || hasPermission('orders_approve')) &&
+        isValidEntitlement(incoming()) &&
+        entitlementId == incoming().userId + '_' + incoming().appId &&
+        incoming().grantedBy == request.auth.uid &&
+        incoming().grantedAt == request.time &&
+        (isSuperAdmin() || incoming().userId != request.auth.uid);
+      allow update: if false;
+      allow delete: if isValidId(entitlementId) && (isSuperAdmin() || hasPermission('orders_reject'));
+    }
+
+    // Payment Settings
+    match /payment_settings/{methodId} {
+      allow get: if isValidId(methodId) && (existing().isEnabled == true || isSuperAdmin() || hasPermission('payments_view'));
+      allow list: if resource.data.isEnabled == true || isSuperAdmin() || hasPermission('payments_view');
+      allow create, update: if isValidId(methodId) && isValidPaymentSetting(incoming()) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time && (
+        isSuperAdmin() ||
+        (methodId == 'easypaisa' && hasPermission('payments_edit_easypaisa')) ||
+        (methodId == 'jazzcash' && hasPermission('payments_edit_jazzcash'))
+      );
+      allow delete: if isValidId(methodId) && isSuperAdmin();
+    }
+
+    // Website Settings (Dynamic public configuration)
+    match /website_settings/{settingKey} {
+      allow get: if isValidId(settingKey);
+      allow list: if true;
+      allow create, update: if isValidId(settingKey) && isValidWebsiteSetting(incoming()) &&
+        incoming().settingKey == settingKey &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time && (
+        isSuperAdmin() ||
+        (settingKey == 'appearance' && hasPermission('appearance_edit')) ||
+        (settingKey != 'appearance' && hasPermission('content_edit'))
+      );
+      allow delete: if isValidId(settingKey) && isSuperAdmin();
+    }
+
+    // Audit Logs (Append-only for admins)
+    match /audit_logs/{logId} {
+      allow get: if isValidId(logId) && (isSuperAdmin() || isActiveAdmin());
+      allow list: if isSuperAdmin() || isActiveAdmin();
+      allow create: if isValidId(logId) && (isSuperAdmin() || isActiveAdmin()) &&
+        isValidAuditLog(incoming()) &&
+        incoming().actorUserId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // Download Logs
+    match /download_logs/{logId} {
+      allow get: if isValidId(logId) && isSignedIn() && (
+        existing().userId == request.auth.uid || isSuperAdmin() || isActiveAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isSuperAdmin() || isActiveAdmin()
+      );
+      allow create: if isValidId(logId) && isVerified() && isValidDownloadLog(incoming()) &&
+        incoming().userId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        (isActiveAdmin() || exists(/databases/$(database)/documents/entitlements/$(request.auth.uid + '_' + incoming().appId)));
+      allow update, delete: if false;
+    }
+
+    // Single-Use Expiring Download Tokens
+    match /download_tokens/{tokenId} {
+      allow get: if isValidId(tokenId) && isSignedIn() && (
+        existing().userId == request.auth.uid || isSuperAdmin() || isActiveAdmin()
+      );
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || isSuperAdmin() || isActiveAdmin()
+      );
+      allow create: if isValidId(tokenId) && isVerified() && isValidDownloadToken(incoming()) &&
+        incoming().tokenId == tokenId &&
+        incoming().userId == request.auth.uid &&
+        incoming().used == false &&
+        incoming().createdAt == request.time &&
+        (isActiveAdmin() || exists(/databases/$(database)/documents/entitlements/$(request.auth.uid + '_' + incoming().appId)));
+      allow update: if isValidId(tokenId) && isVerified() && isValidDownloadToken(incoming()) &&
+        existing().userId == request.auth.uid &&
+        existing().used == false &&
+        incoming().used == true &&
+        incoming().usedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['used', 'usedAt']);
+      allow delete: if isValidId(tokenId) && isSuperAdmin();
+    }
+  }
+}

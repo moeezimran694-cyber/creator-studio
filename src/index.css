@@ -1,0 +1,88 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --cs-bg: #0a0a0f;
+  --cs-card: #12131a;
+  --cs-cyan: #00f3ff;
+  --cs-purple: #bc13fe;
+  --cs-green: #39ff14;
+  --cs-text: #ffffff;
+  --cs-muted: #9ba3b8;
+  --cs-font-heading: 'Orbitron', sans-serif;
+  --cs-font-body: 'Poppins', sans-serif;
+  --cs-font-mono: 'JetBrains Mono', monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    background-color: var(--cs-bg);
+    color: var(--cs-text);
+    font-family: var(--cs-font-body);
+  }
+
+  body {
+    background-color: var(--cs-bg);
+    color: var(--cs-text);
+    font-family: var(--cs-font-body);
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--cs-font-heading);
+    letter-spacing: 0.015em;
+  }
+
+  .font-mono-tabular {
+    font-family: var(--cs-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle cyberpunk surface utilities */
+.cs-glass-card {
+  background-color: color-mix(in srgb, var(--cs-card) 92%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.cs-cyan-glow {
+  box-shadow: 0 0 18px color-mix(in srgb, var(--cs-cyan) 22%, transparent);
+}
+
+.cs-cyan-border-hover:hover {
+  border-color: color-mix(in srgb, var(--cs-cyan) 50%, transparent);
+  box-shadow: 0 8px 30px -12px color-mix(in srgb, var(--cs-cyan) 28%, transparent);
+}
+
+/* Focus visibility */
+:focus-visible {
+  outline: 2px solid var(--cs-cyan);
+  outline-offset: 2px;
+}
+
+/* Prevent white browser autofill background on dark theme inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px #0a0a0f inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #ffffff !important;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

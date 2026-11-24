@@ -1,0 +1,259 @@
+{
+  "entities": {
+    "Profile": {
+      "title": "Profile",
+      "description": "User profile, role, status, and login tracking for storefront users and administrators.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 254 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["USER", "ADMIN", "SUPER_ADMIN"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED"] },
+        "acceptedInvitationId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastLogin": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "status", "createdAt", "lastLogin"]
+    },
+    "AdminPermissions": {
+      "title": "AdminPermissions",
+      "description": "Granular RBAC permissions assigned by the Super Admin to an individual Admin.",
+      "type": "object",
+      "properties": {
+        "adminUserId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "adminEmail": { "type": "string", "format": "email", "minLength": 3, "maxLength": 254 },
+        "permissions": { "type": "object" },
+        "grantedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["adminUserId", "adminEmail", "permissions", "grantedBy", "updatedAt"]
+    },
+    "AdminInvitation": {
+      "title": "AdminInvitation",
+      "description": "Expiring Gmail invitation issued by the Super Admin to onboard a new Admin with pre-assigned permissions.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 254 },
+        "invitationTokenHash": { "type": "string", "minLength": 8, "maxLength": 128 },
+        "permissions": { "type": "object" },
+        "invitedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["PENDING", "ACCEPTED", "REVOKED"] },
+        "acceptedUid": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["email", "invitationTokenHash", "permissions", "invitedBy", "expiresAt", "createdAt", "status"]
+    },
+    "AppListing": {
+      "title": "AppListing",
+      "description": "Public storefront metadata for an authorized software listing. Private download links are isolated in AppFile.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "iconUrl": { "type": "string", "maxLength": 500000 },
+        "iconKey": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "fileSize": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "features": { "type": "array" },
+        "pricePkr": { "type": "number" },
+        "isFeatured": { "type": "boolean" },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "category", "version", "fileSize", "description", "features", "pricePkr", "isFeatured", "isPublished", "createdAt", "updatedAt"]
+    },
+    "AppFile": {
+      "title": "AppFile",
+      "description": "Protected download file metadata and authorized storage/delivery path, accessible only to admins or entitled buyers.",
+      "type": "object",
+      "properties": {
+        "appId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "downloadStoragePath": { "type": "string", "minLength": 1, "maxLength": 600000 },
+        "fileName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "releaseNotes": { "type": "string", "maxLength": 1000 },
+        "updatedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["appId", "downloadStoragePath", "fileName", "updatedBy", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer purchase order with server-verified PKR pricing and admin approval lifecycle.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userEmail": { "type": "string", "format": "email", "minLength": 3, "maxLength": 254 },
+        "userName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "appId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "appName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "transactionId": { "type": "string", "minLength": 3, "maxLength": 100 },
+        "paymentMethod": { "type": "string", "enum": ["EasyPaisa", "JazzCash"] },
+        "hasScreenshot": { "type": "boolean" },
+        "amountPkr": { "type": "number" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED"] },
+        "rejectionReason": { "type": "string", "maxLength": 500 },
+        "reviewedBy": { "type": "string", "maxLength": 128 },
+        "reviewedByEmail": { "type": "string", "maxLength": 254 },
+        "reviewedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userEmail", "userName", "appId", "appName", "transactionId", "paymentMethod", "hasScreenshot", "amountPkr", "status", "createdAt"]
+    },
+    "OrderScreenshot": {
+      "title": "OrderScreenshot",
+      "description": "Protected payment receipt screenshot uploaded by the buyer during checkout.",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "imageData": { "type": "string", "minLength": 5, "maxLength": 600000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "userId", "imageData", "createdAt"]
+    },
+    "Entitlement": {
+      "title": "Entitlement",
+      "description": "Authoritative download entitlement granted atomically upon order approval.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "appId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "grantedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "grantedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "appId", "orderId", "grantedBy", "grantedAt"]
+    },
+    "PaymentSetting": {
+      "title": "PaymentSetting",
+      "description": "Editable EasyPaisa and JazzCash payment account details managed by authorized admins.",
+      "type": "object",
+      "properties": {
+        "method": { "type": "string", "enum": ["EasyPaisa", "JazzCash"] },
+        "accountTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "accountNumber": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "instructions": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "qrImagePath": { "type": "string", "maxLength": 500000 },
+        "isEnabled": { "type": "boolean" },
+        "updatedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["method", "accountTitle", "accountNumber", "instructions", "isEnabled", "updatedBy", "updatedAt"]
+    },
+    "WebsiteSetting": {
+      "title": "WebsiteSetting",
+      "description": "Modular dynamic website customization record (hero, branding, content, navigation, footer, support, marketplace).",
+      "type": "object",
+      "properties": {
+        "settingKey": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "settingValue": { "type": "object" },
+        "updatedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["settingKey", "settingValue", "updatedBy", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable administrative action log tracking changes across apps, orders, settings, and admin roles.",
+      "type": "object",
+      "properties": {
+        "actorUserId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "actorEmail": { "type": "string", "format": "email", "minLength": 3, "maxLength": 254 },
+        "action": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "entityType": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "entityId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "oldValue": { "type": "string", "maxLength": 4000 },
+        "newValue": { "type": "string", "maxLength": 4000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorUserId", "actorEmail", "action", "entityType", "entityId", "summary", "createdAt"]
+    },
+    "DownloadLog": {
+      "title": "DownloadLog",
+      "description": "Download event log created by entitled users when retrieving an approved app package.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "appId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "appName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "appId", "appName", "createdAt"]
+    },
+    "DownloadToken": {
+      "title": "DownloadToken",
+      "description": "Single-use, 60-second expiring download token record generated server-side after entitlement verification.",
+      "type": "object",
+      "properties": {
+        "tokenId": { "type": "string", "minLength": 8, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "appId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "used": { "type": "boolean" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "usedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tokenId", "userId", "appId", "orderId", "used", "expiresAt", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/profiles/{uid}": {
+      "schema": { "$ref": "#/entities/Profile" },
+      "description": "User profiles and roles. Permanent Super Admin is moeezi396@gmail.com."
+    },
+    "/admin_permissions/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminPermissions" },
+      "description": "Per-admin granular permission flags controlled exclusively by the Super Admin."
+    },
+    "/admin_invitations/{invitationId}": {
+      "schema": { "$ref": "#/entities/AdminInvitation" },
+      "description": "Expiring Gmail admin invitations issued by the Super Admin."
+    },
+    "/apps/{appId}": {
+      "schema": { "$ref": "#/entities/AppListing" },
+      "description": "Storefront app catalog entries."
+    },
+    "/app_files/{appId}": {
+      "schema": { "$ref": "#/entities/AppFile" },
+      "description": "Protected download file paths/assets accessible only to authorized admins or entitled buyers via server-side signed token delivery."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Customer payment orders requiring admin approval."
+    },
+    "/order_screenshots/{orderId}": {
+      "schema": { "$ref": "#/entities/OrderScreenshot" },
+      "description": "Protected payment receipt screenshots."
+    },
+    "/entitlements/{entitlementId}": {
+      "schema": { "$ref": "#/entities/Entitlement" },
+      "description": "Download entitlements keyed by {userId}_{appId}."
+    },
+    "/payment_settings/{method}": {
+      "schema": { "$ref": "#/entities/PaymentSetting" },
+      "description": "EasyPaisa and JazzCash payment account settings."
+    },
+    "/website_settings/{settingKey}": {
+      "schema": { "$ref": "#/entities/WebsiteSetting" },
+      "description": "Editable website customization sections."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Append-only administrative audit logs."
+    },
+    "/download_logs/{logId}": {
+      "schema": { "$ref": "#/entities/DownloadLog" },
+      "description": "Verified download event records."
+    },
+    "/download_tokens/{tokenId}": {
+      "schema": { "$ref": "#/entities/DownloadToken" },
+      "description": "Single-use temporary download tokens with 60-second expiration."
+    }
+  }
+}
